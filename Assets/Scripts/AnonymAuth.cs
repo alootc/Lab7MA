@@ -1,6 +1,4 @@
 using UnityEngine;
-
-
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using System.Threading.Tasks;
@@ -9,50 +7,50 @@ public class AnonymAuth : MonoBehaviour
 {
     private async void Start()
     {
-        await UnityServices.InitializeAsync();//->Inicializar los servicios de UGS
-        Debug.Log(UnityServices.State);
+        await UnityServices.InitializeAsync();
+        Debug.Log("Estado de Unity Services: " + UnityServices.State);
         SetupEvents();
-
         await SignInAnonymouslyAsync();
     }
+
     private void SetupEvents()
     {
         AuthenticationService.Instance.SignedIn += () =>
         {
-            Debug.Log("Player ID "+ AuthenticationService.Instance.PlayerId);
-            Debug.Log("Acces Token " + AuthenticationService.Instance.AccessToken);
+            Debug.Log("Player ID: " + AuthenticationService.Instance.PlayerId);
+            Debug.Log("Access Token: " + AuthenticationService.Instance.AccessToken);
         };
 
         AuthenticationService.Instance.SignInFailed += (err) =>
         {
-            Debug.Log(err);
+            Debug.LogError("Error en login: " + err);
         };
+
         AuthenticationService.Instance.SignedOut += () =>
         {
-            Debug.Log("Player log out");
+            Debug.Log("Player cerró sesión");
         };
+
         AuthenticationService.Instance.Expired += () =>
         {
-            Debug.Log("Player session expired");
+            Debug.Log("Sesión expirada");
         };
     }
+
     private async Task SignInAnonymouslyAsync()
     {
         try
         {
             await AuthenticationService.Instance.SignInAnonymouslyAsync();
-           /* Debug.Log("Sign in anon succeeded");
-            Debug.Log("Player ID :" + AuthenticationService.Instance.PlayerId);*/
+            Debug.Log("Login anónimo exitoso");
         }
         catch (AuthenticationException ex)
         {
-            Debug.LogError(ex);
+            Debug.LogError("Error de autenticación: " + ex);
         }
-        catch(RequestFailedException ex)
+        catch (RequestFailedException ex)
         {
-            Debug.LogError(ex);
+            Debug.LogError("Error de request: " + ex);
         }
     }
-
-    
 }

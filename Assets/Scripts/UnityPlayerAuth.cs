@@ -1,5 +1,4 @@
 using UnityEngine;
-
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using System.Threading.Tasks;
@@ -7,49 +6,91 @@ using System;
 using Unity.Services.Authentication.PlayerAccounts;
 using Unity.Services.CloudSave;
 
-using System.Collections.Generic;
-using Sirenix.OdinInspector;
 public class UnityPlayerAuth : MonoBehaviour
 {
-    public event Action<PlayerInfo, string> OnSingedIn;
-    public event Action<String> OnUpdateName;
-    private PlayerInfo playerInfo;
+    public static UnityPlayerAuth Instance;
 
+    public event Action<PlayerInfo, string> OnSignedIn;
+    public event Action<string> OnUpdateName;
+    public event Action OnSignedOut;
+    public event Action<string> OnAuthError;
+
+    private PlayerInfo playerInfo;
+    private bool isInitialized = false;
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
     private async void Start()
     {
-        await UnityServices.InitializeAsync();
-        SetupEvents();
-        PlayerAccountService.Instance.SignedIn += SignIn;
+        await InitializeUnityServices();
     }
-
-    private void SetupEvents()
+    private async Task InitializeUnityServices()
+    {
+        try
+        {
+            await UnityServices.InitializeAsync();
+            SetupAuthEvents();
+            PlayerAccountService.Instance.SignedIn += SignInWithPlayerAccount;
+            isInitialized = true;
+            Debug.Log("Unity Services inicializado correctamente");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Error inicializando Unity Services: " + ex.Message);
+            OnAuthError?.Invoke("Error inicializando servicios: " + ex.Message);
+        }
+    }
+    private void SetupAuthEvents()
     {
         AuthenticationService.Instance.SignedIn += () =>
         {
-            Debug.Log("Player ID " + AuthenticationService.Instance.PlayerId);
-            Debug.Log("Acces Token " + AuthenticationService.Instance.AccessToken);
+            Debug.Log($"Player ID: {AuthenticationService.Instance.PlayerId}");
+            Debug.Log($"Token: {AuthenticationService.Instance.AccessToken}");
         };
-
         AuthenticationService.Instance.SignInFailed += (err) =>
         {
-            Debug.Log(err);
+            Debug.LogError("Error en login: " + err);
+            OnAuthError?.Invoke("Error en login: " + err.Message);
         };
         AuthenticationService.Instance.SignedOut += () =>
         {
-            Debug.Log("Player log out");
+            Debug.Log("Player cerró sesión");
+            OnSignedOut?.Invoke();
         };
         AuthenticationService.Instance.Expired += () =>
         {
-            Debug.Log("Player session expired");
+            Debug.Log("Sesión expirada");
+            OnAuthError?.Invoke("Sesión expirada. Por favor, inicia sesión nuevamente.");
         };
     }
-
-    //->Lo puedes llamar a traves de un boton
     public async Task InitSignIn()
     {
-        await PlayerAccountService.Instance.StartSignInAsync();
+        if (!isInitialized)
+        {
+            OnAuthError?.Invoke("Servicios no inicializados");
+            return;
+        }
+        try
+        {
+            await PlayerAccountService.Instance.StartSignInAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Error iniciando login: " + ex.Message);
+            OnAuthError?.Invoke("Error iniciando sesión: " + ex.Message);
+        }
     }
-    private async void SignIn()
+    private async void SignInWithPlayerAccount()
     {
         try
         {
@@ -57,7 +98,8 @@ public class UnityPlayerAuth : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.Log(ex);
+            Debug.LogError("Error en signIn: " + ex);
+            OnAuthError?.Invoke("Error completando login: " + ex.Message);
         }
     }
     private async Task SignInWithUnityAuth()
@@ -66,74 +108,88 @@ public class UnityPlayerAuth : MonoBehaviour
         {
             string accessToken = PlayerAccountService.Instance.AccessToken;
             await AuthenticationService.Instance.SignInWithUnityAsync(accessToken);
-            Debug.Log("Login Succ");
+
             playerInfo = AuthenticationService.Instance.PlayerInfo;
             var name = await AuthenticationService.Instance.GetPlayerNameAsync();
 
-            OnSingedIn?.Invoke(playerInfo, name);
-            Debug.Log("Sign In Successful ");
+            Debug.Log("Login exitoso con Unity Player Accounts");
+
+            await PlayerDataManager.Instance.LoadPlayerData();
+
+            OnSignedIn?.Invoke(playerInfo, name);
         }
         catch (AuthenticationException ex)
-        {   
-            Debug.LogException(ex);
-        }
-        catch(RequestFailedException ex)
         {
-            Debug.Log(ex);
+            Debug.LogError("Error de autenticación: " + ex);
+            OnAuthError?.Invoke("Error de autenticación: " + ex.Message);
+        }
+        catch (RequestFailedException ex)
+        {
+            Debug.LogError("Error de request: " + ex);
+            OnAuthError?.Invoke("Error de conexión: " + ex.Message);
         }
     }
-
-    public async Task UpdateName(string newName)
+    public async Task UpdatePlayerName(string newName)
     {
-        await AuthenticationService.Instance.UpdatePlayerNameAsync(newName);
-        var name = await AuthenticationService.Instance.GetPlayerNameAsync();
+        try
+        {
+            await AuthenticationService.Instance.UpdatePlayerNameAsync(newName);
+            var name = await AuthenticationService.Instance.GetPlayerNameAsync();
+            OnUpdateName?.Invoke(name);
 
-        OnUpdateName?.Invoke(name);
+            PlayerDataManager.Instance.UpdatePlayerName(name);
+
+            Debug.Log("Nombre actualizado: " + name);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Error actualizando nombre: " + ex.Message);
+            OnAuthError?.Invoke("Error actualizando nombre: " + ex.Message);
+        }
+    }
+    public async Task<string> GetPlayerName()
+    {
+        try
+        {
+            return await AuthenticationService.Instance.GetPlayerNameAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Error obteniendo nombre: " + ex.Message);
+            return "Jugador";
+        }
+    }
+    public async Task SignOut()
+    {
+        try
+        {
+            AuthenticationService.Instance.SignOut();
+            Debug.Log("Sesión cerrada exitosamente");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Error cerrando sesión: " + ex.Message);
+        }
     }
     public async Task DeleteAccountUnityAsync()
     {
         try
         {
             await AuthenticationService.Instance.DeleteAccountAsync();
+            Debug.Log("Cuenta eliminada exitosamente");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-
-            throw;
+            Debug.LogError("Error eliminando cuenta: " + ex.Message);
+            OnAuthError?.Invoke("Error eliminando cuenta: " + ex.Message);
         }
     }
-
-    //-> Cloud Save
-
-
-    [Button]
-    public async void SaveData(string key , string value)
+    public bool IsAuthenticated()
     {
-        var playerData = new Dictionary<string, object>()
-        {
-            {key, value}
-        };
-
-        await CloudSaveService.Instance.Data.Player.SaveAsync(playerData);
+        return AuthenticationService.Instance.IsSignedIn;
     }
-    [Button]
-    public async void LoadData(string key)
+    public string GetPlayerId()
     {
-        var playerData = await CloudSaveService.Instance.Data.Player.LoadAsync(
-           new HashSet<string> { key } 
-            );
-        if(playerData.TryGetValue(key, out var value))
-        {
-            Debug.Log(key + " value : " + value.Value.GetAs<String>());
-        }
-
+        return AuthenticationService.Instance.PlayerId;
     }
-    [Button]
-    public async void DeleteData(string key)
-    {
-        await CloudSaveService.Instance.Data.Player.DeleteAsync(key);
-    }
-
-
-    //
 }
